@@ -2,12 +2,14 @@
 import { cookies } from "next/headers";
 
 import { loginSchema, LoginState } from "@/lib/definitions";
-import { prisma } from "@/lib/prisma";
+import {createClient} from "@/lib/supabase"
 
 
 export const loginAction = async (prevState: LoginState, formData: FormData) => {
   const email = formData.get("email");
   const password = formData.get("password");
+
+  const supabase = await createClient();
 
 
   const validatedData = loginSchema.safeParse({
@@ -23,11 +25,7 @@ export const loginAction = async (prevState: LoginState, formData: FormData) => 
     }
 
     try {
-       const user = await prisma.users.findUnique({
-        where : {
-            email : validatedData.data.email,
-        }
-       })
+       const {data: user, error} = await supabase.from("users").select("*").eq("email", validatedData.data.email).single();
 
         if(!user){
             return {

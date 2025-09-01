@@ -31,7 +31,6 @@ import {
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
 import UploadViewDialog from "./upload-view-dialog";
-import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Calendar } from "../ui/calendar";
 
@@ -49,13 +48,11 @@ const SurveyTable = ({ user }: { user: User }) => {
 
   const queryClient = useQueryClient();
 
-  // Debounce search input
   useEffect(() => {
     const handler = setTimeout(() => setDebouncedSearch(search), 500);
     return () => clearTimeout(handler);
   }, [search]);
 
-  // Fetch surveys
   const { data, isLoading, isPlaceholderData } = useQuery({
     queryKey: [
       "surveys",
@@ -82,9 +79,6 @@ const SurveyTable = ({ user }: { user: User }) => {
 
   const surveys = data?.data as Survey[] | undefined;
 
-  console.log(surveys, "surveys");
-
-  // Prefetch next page
   useEffect(() => {
     if (!data || isPlaceholderData) return;
     const totalPages = Math.ceil((data.count || 0) / 10);
@@ -243,7 +237,7 @@ const SurveyTable = ({ user }: { user: User }) => {
             <Input
               type="search"
               placeholder="Search for route name"
-              className="border-none ring-none shadow-none focus:ring-0"
+              className="border-none ring-none shadow-none focus:ring-0 focus:outline-none focus:border-none"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -363,6 +357,7 @@ const SurveyTable = ({ user }: { user: User }) => {
                   e.preventDefault();
                   setPage((prev) => Math.max(prev - 1, 1));
                 }}
+                className={page <= 1 ? "pointer-events-none opacity-50" : ""}
               />
             </PaginationItem>
 
@@ -393,6 +388,11 @@ const SurveyTable = ({ user }: { user: User }) => {
                   const totalPages = Math.ceil((data?.count || 0) / 10);
                   setPage((prev) => Math.min(prev + 1, totalPages));
                 }}
+                className={
+                  page >= Math.ceil((data?.count || 0) / 10)
+                    ? "pointer-events-none opacity-50"
+                    : ""
+                }
               />
             </PaginationItem>
           </PaginationContent>

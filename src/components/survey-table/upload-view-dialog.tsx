@@ -14,6 +14,7 @@ import { useState } from "react";
 import { uploadToMux } from "./action";
 import { supabase } from "@/lib/supabase-client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 interface UploadedFile {
   file: File;
   preview?: string;
@@ -35,6 +36,7 @@ const UploadViewDialog = ({
     name: string;
   }[];
 }) => {
+  const router = useRouter();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const isUploading = files.some((f) => f.status === "uploading");
   const queryClient = useQueryClient();
@@ -45,13 +47,13 @@ const UploadViewDialog = ({
         .from("videos")
         .update({ survey_id: null })
         .eq("id", videoId);
-      console.log(data, "data");
-      console.log(error, "error");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["surveys"] });
     },
   });
+
+  const isVideo = videos.length > 0;
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files) return;
@@ -74,23 +76,15 @@ const UploadViewDialog = ({
 
   const uploadToSupabase = async (file: File) => {
     const filePath = `${surveyId}/${file.name}`;
-    console.log(filePath, "filePath");
 
-    const { data, error } = await supabase.storage
-      .from("test")
-      .upload(filePath, file, {
-        contentType: file.type,
-        upsert: true,
-      });
-
-    console.log(data, "data");
-    console.log(error, "error");
+    await supabase.storage.from("test").upload(filePath, file, {
+      contentType: file.type,
+      upsert: true,
+    });
 
     const {
       data: { publicUrl },
     } = supabase.storage.from("test").getPublicUrl(filePath);
-
-    console.log(publicUrl, "publicUrl");
 
     const { data: videoData } = await supabase
       .from("videos")
@@ -101,10 +95,15 @@ const UploadViewDialog = ({
       })
       .select()
       .single();
-    console.log(videoData, "videoData");
 
-    const result = await uploadToMux(surveyId, videoData.id, publicUrl);
-    console.log(result, "result");
+    await supabase
+      .from("surveys")
+      .update({ video_id: videoData.id, is_video_uploaded: "true" })
+      .eq("id", surveyId);
+
+    queryClient.invalidateQueries({ queryKey: ["surveys"] });
+
+    await uploadToMux(surveyId, videoData.id, publicUrl);
   };
 
   const handleUpload = async () => {
@@ -155,52 +154,70 @@ const UploadViewDialog = ({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Upload files</DialogTitle>
-          <DialogDescription>Upload audio or video files.</DialogDescription>
+          <DialogTitle>
+            {isVideo ? "Uploaded Video" : "Upload Video?"}
+          </DialogTitle>
+          <DialogDescription>
+            {isVideo ? "Uploaded video files." : "Upload video files."}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="mt-4 bg-gray-11 flex items-center justify-center p-[50px] rounded-md border-3 border-dashed border-gray-9 hover:bg-gray-200 transition-all duration-300 hover:border-gray-400">
-          <div>
-            <label
-              htmlFor="file-upload"
-              className="cursor-pointer flex flex-col items-center"
-            >
-              <Image src="/select-file.png" alt="" width={80} height={80} />
-              <p className="text-purple-600 text-xs font-semibold">
-                Select File
-              </p>
-            </label>
-            <input
-              type="file"
-              accept=".mp3,.wav,.mp4"
-              id="file-upload"
-              className="hidden"
-              multiple
-              onChange={handleFileChange}
-            />
+        {!isVideo && (
+          <div className="mt-4 bg-gray-11 flex items-center justify-center p-[50px] rounded-md border-3 border-dashed border-gray-9 hover:bg-gray-200 transition-all duration-300 hover:border-gray-400">
+            <div>
+              <label
+                htmlFor="file-upload"
+                className="cursor-pointer flex flex-col items-center"
+              >
+                <Image
+                  src="/select-file.png"
+                  alt=""
+                  width={80}
+                  height={80}
+                  className="w-20 h-20"
+                />
+                <p className="text-purple-600 text-xs font-semibold">
+                  Select File
+                </p>
+              </label>
+              <input
+                type="file"
+                accept=".mp3,.wav,.mp4"
+                id="file-upload"
+                className="hidden"
+                multiple
+                onChange={handleFileChange}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
-        <p>Uploaded Videos</p>
-        {videos.length > 0 && (
-          <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2">
+        {videos.length > 0 && isVideo && (
+          <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2 hover:shadow-md transition-all duration-300">
             {videos.map((f, index) => (
               <div
                 key={index}
-                className="flex items-center justify-between p-1 text-sm border-b last:border-b-0 gap-2"
+                className="flex items-center justify-between p-1 text-sm border-b last:border-b-0 gap-2 cursor-pointer"
+                onClick={() => {
+                  router.push(
+                    `https://geo-tagged-video-poc.vercel.app/video/${surveyId}`
+                  );
+                }}
               >
                 <video
-                  src={f.url}
                   className="w-12 h-12 object-cover rounded"
                   controls={false}
-                />
+                >
+                  <source src={f.url} type="video/mp4" />
+                </video>
 
                 <p>{f.name}</p>
 
                 <button
                   type="button"
                   className="ml-2 text-red-500 hover:text-red-700"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     deleteVideo(f.id);
                   }}
                 >
@@ -211,9 +228,7 @@ const UploadViewDialog = ({
           </div>
         )}
 
-        <p>Uploaded Files</p>
-
-        {files.length > 0 && (
+        {files.length > 0 && !isVideo && (
           <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2">
             {files.map((f, index) => (
               <div
@@ -258,14 +273,17 @@ const UploadViewDialog = ({
             ))}
           </div>
         )}
-        <DialogFooter>
-          <Button
-            disabled={files.length === 0 || isUploading}
-            onClick={handleUpload}
-          >
-            Upload
-          </Button>
-        </DialogFooter>
+
+        {!isVideo && (
+          <DialogFooter>
+            <Button
+              disabled={files.length === 0 || isUploading}
+              onClick={handleUpload}
+            >
+              Upload
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

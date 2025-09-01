@@ -36,10 +36,6 @@ export type User = {
 
 
 export type Survey = {
-  block : string | null,
-  child_ring : string | null,
-  created_at : Date,
-  district : string | null,
   gps_track_id : string | null,
   gps_tracks : {
     id : string,
@@ -49,10 +45,7 @@ export type Survey = {
   id : string,
   is_video_uploaded : string,
   name : string,
-  ring : string | null,
-  state : string | null,
   timestamp : string,
-  user_id : string,
   video_id : string | null,
   videos : {
     id : string,
