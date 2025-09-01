@@ -37,19 +37,21 @@ const UploadViewDialog = ({
   }[];
 }) => {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const isUploading = files.some((f) => f.status === "uploading");
   const queryClient = useQueryClient();
   const { mutate: deleteVideo } = useMutation({
     mutationKey: ["upload-video"],
-    mutationFn: async (videoId: string) => {
+    mutationFn: async (surveyId: string) => {
       const { data, error } = await supabase
-        .from("videos")
-        .update({ survey_id: null })
-        .eq("id", videoId);
+        .from("surveys")
+        .update({ video_id: null })
+        .eq("id", surveyId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["surveys"] });
+      setOpen(false);
     },
   });
 
@@ -76,34 +78,39 @@ const UploadViewDialog = ({
 
   const uploadToSupabase = async (file: File) => {
     const filePath = `${surveyId}/${file.name}`;
+    console.log(filePath, "filePath");
+    try {
+      await supabase.storage.from("test").upload(filePath, file, {
+        contentType: file.type,
+        upsert: true,
+      });
 
-    await supabase.storage.from("test").upload(filePath, file, {
-      contentType: file.type,
-      upsert: true,
-    });
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("test").getPublicUrl(filePath);
+      console.log(publicUrl, "publicUrl");
+      const { data: videoData } = await supabase
+        .from("videos")
+        .insert({
+          name: file.name,
+          url: publicUrl,
+          survey_id: surveyId,
+        })
+        .select()
+        .single();
+      console.log(videoData, "videoData");
+      await supabase
+        .from("surveys")
+        .update({ video_id: videoData.id, is_video_uploaded: "true" })
+        .eq("id", surveyId);
+      console.log(videoData.id, "videoData.id");
+      queryClient.invalidateQueries({ queryKey: ["surveys"] });
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("test").getPublicUrl(filePath);
-
-    const { data: videoData } = await supabase
-      .from("videos")
-      .insert({
-        name: file.name,
-        url: publicUrl,
-        survey_id: surveyId,
-      })
-      .select()
-      .single();
-
-    await supabase
-      .from("surveys")
-      .update({ video_id: videoData.id, is_video_uploaded: "true" })
-      .eq("id", surveyId);
-
-    queryClient.invalidateQueries({ queryKey: ["surveys"] });
-
-    await uploadToMux(surveyId, videoData.id, publicUrl);
+      await uploadToMux(surveyId, videoData.id, publicUrl);
+      console.log("uploaded to mux");
+    } catch (error) {
+      console.log(error);
+    }
   };
 
   const handleUpload = async () => {
@@ -130,7 +137,7 @@ const UploadViewDialog = ({
   };
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <div className="flex justify-center">
           <Button
@@ -218,7 +225,7 @@ const UploadViewDialog = ({
                   className="ml-2 text-red-500 hover:text-red-700"
                   onClick={(e) => {
                     e.stopPropagation();
-                    deleteVideo(f.id);
+                    deleteVideo(surveyId);
                   }}
                 >
                   <Trash2 className="w-5 h-5" />

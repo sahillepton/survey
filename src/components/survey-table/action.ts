@@ -19,9 +19,11 @@ export const uploadToMux = async (surveyId : string, videoId : string, publicUrl
             playback_policies : ["public"],
         })
         console.log(asset.id, "asset");
-        await supabase.from("videos").update({
-            "asset_id" : asset.id
-        }).eq("id", videoId)
+
+        await supabase.from("assets").insert({
+            video_id : videoId,
+            asset_id : asset.id
+        })
 
         return {
             success : true,
