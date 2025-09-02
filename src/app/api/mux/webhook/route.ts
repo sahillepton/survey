@@ -1,13 +1,16 @@
-import { mux } from "@/components/survey-table/action";
+
 import { createClient } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
+import { Mux } from "@mux/mux-node"
+
+const mux = new Mux({
+    tokenId: "7f1ca50f-349b-464a-95b2-73fa0751925b",
+    tokenSecret: "MdHABlNRtlqfKmcL3p6W90iK3+ZWMh9OhoxN0D3THJoWAAcbIiCTNIECZjcCEJfDUPH85fPnGHe",
+});
 
 export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
-
-
-
     const event = JSON.parse(rawBody);
     const supabase = await createClient();
 
@@ -32,7 +35,7 @@ export async function POST(req: NextRequest) {
           video_id : assetData?.video_id,
           asset_id : asset.id
         })
-        
+
         break;
       default:
         console.log("Unhandled event:", event.type);
