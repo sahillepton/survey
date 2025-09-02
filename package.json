@@ -5,9 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "pull": "npx prisma db pull",
-    "generate": "npx prisma generate"
+    "start": "next start"
   },
   "dependencies": {
     "@mux/mux-node": "^12.6.1",
@@ -40,17 +38,13 @@
     "zod": "^4.1.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.34.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9.34.0",
-    "eslint-plugin-react": "^7.37.5",
     "globals": "^16.3.0",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.7",
-    "typescript": "^5",
-    "typescript-eslint": "^8.41.0"
+    "typescript": "^5"
   }
 }
