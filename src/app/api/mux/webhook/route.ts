@@ -1,3 +1,4 @@
+import { mux } from "@/components/survey-table/action";
 import { createClient } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -21,7 +22,17 @@ export async function POST(req: NextRequest) {
         }
         break;
       case "video.asset.errored":
-        console.error("Video errored ❌", event.data);
+        const { data : assetData } = await supabase.from("assets").select("*").eq("asset_id", event.object.id).single();
+        const {data : videoData} = await supabase.from("videos").select("url").eq("id", assetData?.video_id).single();
+        const asset = await mux.video.assets.create({
+          inputs : [{url: videoData?.url}],
+          playback_policies : ["public"],
+        })
+        await supabase.from("assets").insert({
+          video_id : assetData?.video_id,
+          asset_id : asset.id
+        })
+        
         break;
       default:
         console.log("Unhandled event:", event.type);

@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase";
 import { Mux } from "@mux/mux-node"
 
-const mux = new Mux({
+ export const mux = new Mux({
     tokenId: "7f1ca50f-349b-464a-95b2-73fa0751925b",
     tokenSecret: "MdHABlNRtlqfKmcL3p6W90iK3+ZWMh9OhoxN0D3THJoWAAcbIiCTNIECZjcCEJfDUPH85fPnGHe",
 });
