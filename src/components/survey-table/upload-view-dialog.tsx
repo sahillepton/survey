@@ -1,3 +1,5 @@
+"use client";
+import PQueue from "p-queue";
 import { UploadIcon, VideoIcon, Trash2, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -15,12 +17,17 @@ import { uploadToMux } from "./action";
 import { supabase } from "@/lib/supabase-client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import * as tus from "tus-js-client";
+import { toast } from "sonner";
+
 interface UploadedFile {
   file: File;
   preview?: string;
   type: "video" | "audio";
   status?: "pending" | "uploading" | "done" | "error";
 }
+
+const queue = new PQueue();
 
 const UploadViewDialog = ({
   isVideoUploaded,
@@ -39,12 +46,13 @@ const UploadViewDialog = ({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>([]);
-  const isUploading = files.some((f) => f.status === "uploading");
   const queryClient = useQueryClient();
+
+  // --- Delete video mutation ---
   const { mutate: deleteVideo } = useMutation({
-    mutationKey: ["upload-video"],
+    mutationKey: ["delete-video", surveyId],
     mutationFn: async (surveyId: string) => {
-      const { data, error } = await supabase
+      await supabase
         .from("surveys")
         .update({ video_id: null })
         .eq("id", surveyId);
@@ -52,6 +60,44 @@ const UploadViewDialog = ({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["surveys"] });
       setOpen(false);
+    },
+  });
+
+  // --- Upload video mutation (background) ---
+  const uploadMutation = useMutation({
+    mutationKey: ["upload-video", surveyId],
+    mutationFn: async (file: File) => {
+      const filePath = `${surveyId}/${file.name}`;
+      await supabase.storage.from("test").upload(filePath, file, {
+        contentType: file.type,
+        upsert: true,
+      });
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("test").getPublicUrl(filePath);
+
+      const { data: videoData } = await supabase
+        .from("videos")
+        .insert({
+          name: file.name,
+          url: publicUrl,
+          survey_id: surveyId,
+        })
+        .select()
+        .single();
+
+      await supabase
+        .from("surveys")
+        .update({ video_id: videoData.id, is_video_uploaded: "true" })
+        .eq("id", surveyId);
+
+      await uploadToMux(surveyId, videoData.id, publicUrl);
+
+      return videoData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["surveys"] });
     },
   });
 
@@ -76,65 +122,39 @@ const UploadViewDialog = ({
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const uploadToSupabase = async (file: File) => {
-    const filePath = `${surveyId}/${file.name}`;
-    console.log(filePath, "filePath");
-    try {
-      await supabase.storage.from("test").upload(filePath, file, {
-        contentType: file.type,
-        upsert: true,
-      });
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("test").getPublicUrl(filePath);
-      console.log(publicUrl, "publicUrl");
-      const { data: videoData } = await supabase
-        .from("videos")
-        .insert({
-          name: file.name,
-          url: publicUrl,
-          survey_id: surveyId,
-        })
-        .select()
-        .single();
-      console.log(videoData, "videoData");
-      await supabase
-        .from("surveys")
-        .update({ video_id: videoData.id, is_video_uploaded: "true" })
-        .eq("id", surveyId);
-      console.log(videoData.id, "videoData.id");
-      queryClient.invalidateQueries({ queryKey: ["surveys"] });
-
-      await uploadToMux(surveyId, videoData.id, publicUrl);
-      console.log("uploaded to mux");
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  const handleUpload = async () => {
-    if (!files || files.length === 0) return;
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
+  const handleUpload = () => {
+    files.forEach((f, idx) => {
+      // immediately mark as uploading
       setFiles((prev) =>
-        prev.map((f, idx) => (idx === i ? { ...f, status: "uploading" } : f))
+        prev.map((file, i) =>
+          i === idx ? { ...file, status: "uploading" } : file
+        )
       );
 
-      try {
-        await uploadToSupabase(file.file);
-        setFiles((prev) =>
-          prev.map((f, idx) => (idx === i ? { ...f, status: "done" } : f))
-        );
-      } catch (err) {
-        setFiles((prev) =>
-          prev.map((f, idx) => (idx === i ? { ...f, status: "error" } : f))
-        );
-      }
-    }
+      queue.add(() => {
+        uploadMutation.mutate(f.file, {
+          onSuccess: () => {
+            setFiles((prev) =>
+              prev.map((file, i) =>
+                i === idx ? { ...file, status: "done" } : file
+              )
+            );
+            toast.success(`Upload successful for ${f.file.name}`);
+          },
+          onError: () => {
+            setFiles((prev) =>
+              prev.map((file, i) =>
+                i === idx ? { ...file, status: "error" } : file
+              )
+            );
+            toast.error(`Upload failed for ${f.file.name}`);
+          },
+        });
+      });
+    });
   };
+
+  const isUploading = files.some((f) => f.status === "uploading");
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -169,6 +189,7 @@ const UploadViewDialog = ({
           </DialogDescription>
         </DialogHeader>
 
+        {/* File picker */}
         {!isVideo && (
           <div className="mt-4 bg-gray-11 flex items-center justify-center p-[50px] rounded-md border-3 border-dashed border-gray-9 hover:bg-gray-200 transition-all duration-300 hover:border-gray-400">
             <div>
@@ -199,6 +220,7 @@ const UploadViewDialog = ({
           </div>
         )}
 
+        {/* Existing uploaded videos */}
         {videos.length > 0 && isVideo && (
           <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2 hover:shadow-md transition-all duration-300">
             {videos.map((f, index) => (
@@ -235,6 +257,7 @@ const UploadViewDialog = ({
           </div>
         )}
 
+        {/* Files being uploaded */}
         {files.length > 0 && !isVideo && (
           <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2">
             {files.map((f, index) => (
@@ -281,6 +304,7 @@ const UploadViewDialog = ({
           </div>
         )}
 
+        {/* Upload button */}
         {!isVideo && (
           <DialogFooter>
             <Button
