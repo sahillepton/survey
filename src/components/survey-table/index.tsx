@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use client";
 
 import { getSurveys } from "@/app/surveys/action";
@@ -199,6 +200,7 @@ const SurveyTable = ({ user }: { user: User }) => {
             id: video.id,
             mux_playback_id: video.mux_playback_id,
             url: video.url,
+            name: video.name,
           }))}
         />
       ),

@@ -30,6 +30,7 @@ const UploadViewDialog = ({
     id: string;
     mux_playback_id: string;
     url: string;
+    name: string;
   }[];
 }) => {
   const router = useRouter();
@@ -126,7 +127,7 @@ const UploadViewDialog = ({
     mutationFn: async (surveyId: string) => {
       await supabase
         .from("surveys")
-        .update({ video_id: null })
+        .update({ video_id: null, is_video_uploaded: "false" })
         .eq("id", surveyId);
 
       await supabase.from("videos").delete().eq("survey_id", surveyId);
@@ -139,8 +140,6 @@ const UploadViewDialog = ({
   });
 
   const isVideo = videos.length > 0;
-
-  console.log(isVideo);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -204,6 +203,8 @@ const UploadViewDialog = ({
                 >
                   <source src={f.url} type="video/mp4" />
                 </video>
+
+                <p>{f.name}</p>
 
                 <button
                   type="button"
