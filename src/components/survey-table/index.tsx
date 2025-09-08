@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { getSurveys } from "@/app/surveys/action";
@@ -10,7 +9,7 @@ import {
 } from "@tanstack/react-query";
 import { DataTable } from "./data-table";
 import { ColumnDef } from "@tanstack/react-table";
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import {
@@ -38,7 +37,7 @@ import { Calendar } from "../ui/calendar";
 const SurveyTable = ({ user }: { user: User }) => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [uploadStatus, setUploadStatus] = useState<
     "All" | "Uploaded" | "Not Uploaded"
   >("All");
@@ -49,16 +48,11 @@ const SurveyTable = ({ user }: { user: User }) => {
 
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedSearch(search), 500);
-    return () => clearTimeout(handler);
-  }, [search]);
-
   const { data, isLoading, isPlaceholderData } = useQuery({
     queryKey: [
       "surveys",
       page,
-      debouncedSearch,
+      deferredSearch,
       uploadStatus,
       dateRangeStart,
       dateRangeEnd,
@@ -68,7 +62,7 @@ const SurveyTable = ({ user }: { user: User }) => {
         user.role,
         user.user_id,
         page,
-        debouncedSearch,
+        deferredSearch,
         uploadStatus,
         dateRangeStart,
         dateRangeEnd
@@ -82,6 +76,7 @@ const SurveyTable = ({ user }: { user: User }) => {
 
   useEffect(() => {
     if (!data || isPlaceholderData) return;
+
     const totalPages = Math.ceil((data.count || 0) / 10);
     if (page < totalPages) {
       startTransition(() => {
@@ -89,7 +84,7 @@ const SurveyTable = ({ user }: { user: User }) => {
           queryKey: [
             "surveys",
             page + 1,
-            debouncedSearch,
+            deferredSearch,
             uploadStatus,
             dateRangeStart,
             dateRangeEnd,
@@ -99,7 +94,7 @@ const SurveyTable = ({ user }: { user: User }) => {
               user.role,
               user.user_id,
               page + 1,
-              debouncedSearch,
+              deferredSearch,
               uploadStatus,
               dateRangeStart,
               dateRangeEnd
@@ -110,12 +105,13 @@ const SurveyTable = ({ user }: { user: User }) => {
   }, [
     page,
     data,
-    debouncedSearch,
+    deferredSearch,
     uploadStatus,
     dateRangeStart,
     dateRangeEnd,
     queryClient,
     user.role,
+    isPlaceholderData,
     user.user_id,
   ]);
 
@@ -199,7 +195,11 @@ const SurveyTable = ({ user }: { user: User }) => {
         <UploadViewDialog
           isVideoUploaded={row.original.videos.length > 0}
           surveyId={row.original.id}
-          videos={row.original.videos}
+          videos={row.original.videos.map((video) => ({
+            id: video.id,
+            mux_playback_id: video.mux_playback_id,
+            url: video.url,
+          }))}
         />
       ),
     },

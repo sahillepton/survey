@@ -1,34 +1,24 @@
 "use client";
-import PQueue from "p-queue";
-import { UploadIcon, VideoIcon, Trash2, Loader2 } from "lucide-react";
+import { UploadIcon, VideoIcon, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "../ui/dialog";
-import Image from "next/image";
-import { useState } from "react";
-import { uploadToMux } from "./action";
+import { useEffect, useCallback, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import * as tus from "tus-js-client";
 import { toast } from "sonner";
+import { useUppyWithSupabase } from "@/hooks/useUppyWithSupabase";
+import "@uppy/core/css/style.min.css";
+import "@uppy/dashboard/css/style.min.css";
 
-interface UploadedFile {
-  file: File;
-  preview?: string;
-  type: "video" | "audio";
-  status?: "pending" | "uploading" | "done" | "error";
-}
-
-const queue = new PQueue();
-
+import { Dashboard } from "@uppy/react";
 const UploadViewDialog = ({
   isVideoUploaded,
   surveyId,
@@ -40,15 +30,97 @@ const UploadViewDialog = ({
     id: string;
     mux_playback_id: string;
     url: string;
-    name: string;
   }[];
 }) => {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [files, setFiles] = useState<UploadedFile[]>([]);
   const queryClient = useQueryClient();
 
-  // --- Delete video mutation ---
+  const [isUploading, setIsUploading] = useState(false);
+
+  const uppy = useUppyWithSupabase({
+    bucketName: "videos",
+    folder: surveyId,
+    accessToken: null,
+    surveyId: surveyId,
+  });
+
+  const handleUploadComplete = async (surveyId: string, fileName: string) => {
+    const toastId = toast.loading("Processing upload...");
+    try {
+      const publicUrl = `https://bharatnet.survey.rio.software/storage/v1/object/public/videos/${surveyId}/${fileName}`;
+
+      const { data: videoData, error: videoError } = await supabase
+        .from("videos")
+        .insert({
+          name: fileName,
+          url: publicUrl,
+          survey_id: surveyId,
+        })
+        .select()
+        .single();
+
+      if (videoError) throw videoError;
+      const { error: surveyError } = await supabase
+        .from("surveys")
+        .update({
+          video_id: videoData.id,
+          is_video_uploaded: true,
+        })
+        .eq("id", surveyId);
+
+      if (surveyError) throw surveyError;
+
+      queryClient.invalidateQueries({ queryKey: ["surveys"] });
+
+      toast.success("Video uploaded successfully!", { id: toastId });
+    } catch (error) {
+      console.error("Error processing upload:", error);
+      toast.error("Failed to process upload", { id: toastId });
+    }
+  };
+
+  const handleComplete = useCallback(
+    (result: any) => {
+      setIsUploading(false);
+      if (result.successful?.length > 0) {
+        const uploadedFile = result.successful[0];
+        handleUploadComplete(surveyId, uploadedFile.name);
+      }
+    },
+    [surveyId, handleUploadComplete]
+  );
+
+  const handleError = useCallback((file: any, error: any) => {
+    setIsUploading(false);
+    console.error("Upload error:", error);
+  }, []);
+
+  const handleUploadStart = useCallback(() => {
+    setIsUploading(true);
+  }, []);
+
+  useEffect(() => {
+    uppy.on("upload", handleUploadStart);
+    return () => {
+      uppy.off("upload", handleUploadStart);
+    };
+  }, [uppy, handleUploadStart]);
+
+  useEffect(() => {
+    uppy.on("complete", handleComplete);
+    return () => {
+      uppy.off("complete", handleComplete);
+    };
+  }, [uppy, handleComplete]);
+
+  useEffect(() => {
+    uppy.on("upload-error", handleError);
+    return () => {
+      uppy.off("upload-error", handleError);
+    };
+  }, [uppy, handleError]);
+
   const { mutate: deleteVideo } = useMutation({
     mutationKey: ["delete-video", surveyId],
     mutationFn: async (surveyId: string) => {
@@ -56,105 +128,19 @@ const UploadViewDialog = ({
         .from("surveys")
         .update({ video_id: null })
         .eq("id", surveyId);
+
+      await supabase.from("videos").delete().eq("survey_id", surveyId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["surveys"] });
       setOpen(false);
-    },
-  });
-
-  // --- Upload video mutation (background) ---
-  const uploadMutation = useMutation({
-    mutationKey: ["upload-video", surveyId],
-    mutationFn: async (file: File) => {
-      const filePath = `${surveyId}/${file.name}`;
-      await supabase.storage.from("test").upload(filePath, file, {
-        contentType: file.type,
-        upsert: true,
-      });
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("test").getPublicUrl(filePath);
-
-      const { data: videoData } = await supabase
-        .from("videos")
-        .insert({
-          name: file.name,
-          url: publicUrl,
-          survey_id: surveyId,
-        })
-        .select()
-        .single();
-
-      await supabase
-        .from("surveys")
-        .update({ video_id: videoData.id, is_video_uploaded: "true" })
-        .eq("id", surveyId);
-
-      await uploadToMux(surveyId, videoData.id, publicUrl);
-
-      return videoData;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["surveys"] });
+      toast.success("Video deleted successfully!");
     },
   });
 
   const isVideo = videos.length > 0;
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files) return;
-
-    const newFiles: UploadedFile[] = Array.from(event.target.files).map(
-      (file) => ({
-        file,
-        preview: URL.createObjectURL(file),
-        type: file.type.startsWith("video/") ? "video" : "audio",
-        status: "pending",
-      })
-    );
-
-    setFiles((prev) => [...prev, ...newFiles]);
-  };
-
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleUpload = () => {
-    files.forEach((f, idx) => {
-      // immediately mark as uploading
-      setFiles((prev) =>
-        prev.map((file, i) =>
-          i === idx ? { ...file, status: "uploading" } : file
-        )
-      );
-
-      queue.add(() => {
-        uploadMutation.mutate(f.file, {
-          onSuccess: () => {
-            setFiles((prev) =>
-              prev.map((file, i) =>
-                i === idx ? { ...file, status: "done" } : file
-              )
-            );
-            toast.success(`Upload successful for ${f.file.name}`);
-          },
-          onError: () => {
-            setFiles((prev) =>
-              prev.map((file, i) =>
-                i === idx ? { ...file, status: "error" } : file
-              )
-            );
-            toast.error(`Upload failed for ${f.file.name}`);
-          },
-        });
-      });
-    });
-  };
-
-  const isUploading = files.some((f) => f.status === "uploading");
+  console.log(isVideo);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -180,47 +166,26 @@ const UploadViewDialog = ({
         </div>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {isVideo ? "Uploaded Video" : "Upload Video?"}
-          </DialogTitle>
-          <DialogDescription>
-            {isVideo ? "Uploaded video files." : "Upload video files."}
-          </DialogDescription>
+        <DialogHeader className={`${isVideo ? "block" : "hidden"}`}>
+          <DialogTitle>Uploaded Video</DialogTitle>
+          <DialogDescription>Uploaded video files.</DialogDescription>
         </DialogHeader>
 
-        {/* File picker */}
-        {!isVideo && (
-          <div className="mt-4 bg-gray-11 flex items-center justify-center p-[50px] rounded-md border-3 border-dashed border-gray-9 hover:bg-gray-200 transition-all duration-300 hover:border-gray-400">
-            <div>
-              <label
-                htmlFor="file-upload"
-                className="cursor-pointer flex flex-col items-center"
-              >
-                <Image
-                  src="/select-file.png"
-                  alt=""
-                  width={80}
-                  height={80}
-                  className="w-20 h-20"
-                />
-                <p className="text-purple-600 text-xs font-semibold">
-                  Select File
-                </p>
-              </label>
-              <input
-                type="file"
-                accept=".mp3,.wav,.mp4"
-                id="file-upload"
-                className="hidden"
-                multiple
-                onChange={handleFileChange}
-              />
-            </div>
+        {!isVideoUploaded && (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
+            <Dashboard
+              uppy={uppy}
+              hideProgressDetails={false}
+              proudlyDisplayPoweredByUppy={false}
+              height={200}
+              width="100%"
+              showRemoveButtonAfterComplete={false}
+              theme="light"
+              showLinkToFileUploadResult={false}
+            />
           </div>
         )}
 
-        {/* Existing uploaded videos */}
         {videos.length > 0 && isVideo && (
           <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2 hover:shadow-md transition-all duration-300">
             {videos.map((f, index) => (
@@ -229,7 +194,7 @@ const UploadViewDialog = ({
                 className="flex items-center justify-between p-1 text-sm border-b last:border-b-0 gap-2 cursor-pointer"
                 onClick={() => {
                   router.push(
-                    `https://geo-tagged-video-poc.vercel.app/video/${surveyId}`
+                    `https://geotagvideo.vercel.app/video/${surveyId}`
                   );
                 }}
               >
@@ -239,8 +204,6 @@ const UploadViewDialog = ({
                 >
                   <source src={f.url} type="video/mp4" />
                 </video>
-
-                <p>{f.name}</p>
 
                 <button
                   type="button"
@@ -255,65 +218,6 @@ const UploadViewDialog = ({
               </div>
             ))}
           </div>
-        )}
-
-        {/* Files being uploaded */}
-        {files.length > 0 && !isVideo && (
-          <div className="mt-4 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2">
-            {files.map((f, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between p-1 text-sm border-b last:border-b-0 gap-2"
-              >
-                {f.type === "video" ? (
-                  <video
-                    src={f.preview}
-                    className="w-12 h-12 object-cover rounded"
-                    controls={false}
-                  />
-                ) : (
-                  <VideoIcon className="w-8 h-8 text-gray-400" />
-                )}
-
-                <div className="flex-1 truncate">{f.file.name}</div>
-                <span className="text-gray-400 text-xs">
-                  {(f.file.size / 1024 / 1024).toFixed(2)} MB
-                </span>
-
-                {f.status === "uploading" && (
-                  <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
-                )}
-                {f.status === "done" && (
-                  <span className="text-green-600 text-xs">✔</span>
-                )}
-                {f.status === "error" && (
-                  <span className="text-red-600 text-xs">✖</span>
-                )}
-
-                {f.status === "pending" && (
-                  <button
-                    type="button"
-                    onClick={() => removeFile(index)}
-                    className="ml-2 text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Upload button */}
-        {!isVideo && (
-          <DialogFooter>
-            <Button
-              disabled={files.length === 0 || isUploading}
-              onClick={handleUpload}
-            >
-              Upload
-            </Button>
-          </DialogFooter>
         )}
       </DialogContent>
     </Dialog>
